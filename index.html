@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <title>Smart BMS Jikong - Online Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="author" content="Teguh Sakura (teguh.sakura@yahoo.com)">
+    <!-- MQTT.js CDN -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #0f172a; color: white; margin: 0; padding: 10px; line-height: 1.5; }
+        h1 { text-align: center; color: white; margin: 15px 0 10px 0; font-size: 1.8rem; }
+        h2 { text-align: center; margin-top: 0; font-size: 1.2rem; color: #38bdf8; margin-bottom: 15px; }
+
+        .container { max-width: 480px; margin: 12px auto; background: #1e293b; padding: 18px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
+        
+        /* Status Bar MQTT */
+        .status-bar { text-align: center; padding: 8px 12px; border-radius: 20px; font-weight: bold; font-size: 13px; margin-bottom: 15px; background: #334155; color: #94a3b8; }
+        .status-connected { background: #14532d; color: #86efac; border: 1px solid #22c55e; }
+        .status-disconnected { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; }
+
+        /* Metrics Grid Layouts */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+        
+        .card { background: #111827; border: 1px solid #374151; padding: 10px 8px; border-radius: 8px; text-align: center; }
+        .card .title { color: #94a3b8; font-size: 11px; font-weight: 600; margin-bottom: 3px; }
+        .card .value { font-size: 1.2rem; font-weight: bold; color: #38bdf8; }
+        .card .unit { font-size: 0.75rem; color: #64748b; }
+
+        /* Status Indicator Badges */
+        .badge-group { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 15px; }
+        .badge {  flex: 1;  text-align: center;  padding: 8px 4px; border-radius: 6px; font-size: 12px; font-weight: bold; background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; transition: all 0.2s ease; }
+        .badge.active { background: #052e16; color: #86efac; border-color: #22c55e; }
+
+        /* Cell Voltages Grid */
+        .cells-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+        .cell-box { background: #111827; border: 1px solid #374151; padding: 8px 4px; border-radius: 6px; text-align: center; font-size: 12px; }
+        .cell-box.min-cell { border-color: #ef4444; background: #450a0a; color: #fca5a5; }
+        .cell-box.max-cell { border-color: #22c55e; background: #052e16; color: #86efac; }
+        .cell-label { color: #64748b; font-size: 10px; }
+
+        hr { border: 0; border-top: 1px solid #334155; margin: 15px 0; }
+
+        /* Client Link Button */
+        .client-info { text-align: center; margin-top: 10px; }
+        .client-btn { background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 13px; font-weight: bold; }
+        .client-btn:hover { color: #7dd3fc; }
+
+        /* Footer */
+        .footer { text-align: center; padding: 20px; margin-top: 20px; border-top: 1px solid #1e293b; color: #475569; font-size: 13px; }
+        .footer a { color: #3498db; text-decoration: none; }
+
+        /* Modal Overlay */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; opacity: 0; transition: all 0.2s ease-in-out; }
+        .modal-overlay.active { visibility: visible; opacity: 1; }
+        .modal-card { background: #1e293b; width: 90%; max-width: 400px; padding: 20px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .input-group { margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
+        .input-group label { color: #94a3b8; font-size: 14px; font-weight: 600; }
+        input[type=text] { width: 100%; padding: 12px; background: #111827; border: 1px solid #374151; color: white; border-radius: 8px; font-size: 14px; outline: none; }
+        input:focus { border-color: #38bdf8; }
+        .btn-primary { width: 100%; padding: 12px; background: #16a34a; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 15px; color: white; }
+        .btn-primary:hover { opacity: 0.9; }
+    </style>
+</head>
+<body>
+
+    <h1>⚙️ Smart BMS Jikong</h1>
+    
+    <div class="container">
+        <!-- Status Koneksi -->
+        <div id="statusBox" class="status-bar status-disconnected">🔴 Terputus dari Broker</div>
+
+        <h2>Ringkasan Daya & SOC</h2>
+        <div class="grid-2">
+            <div class="card">
+                <div class="title">Tegangan Baterai</div>
+                <div class="value" id="val_voltage">-</div>
+                <div class="unit">Volt (V)</div>
+            </div>
+            <div class="card">
+                <div class="title">Arus Pengisian</div>
+                <div class="value" id="val_current">-</div>
+                <div class="unit">Ampere (A)</div>
+            </div>
+            <div class="card">
+                <div class="title">Daya Baterai</div>
+                <div class="value" id="val_power">-</div>
+                <div class="unit">Watt (W)</div>
+            </div>
+            <div class="card">
+                <div class="title">State of Charge</div>
+                <div class="value" id="val_soc">-</div>
+                <div class="unit">Persen (%)</div>
+            </div>
+        </div>
+
+        <!-- Status Sakelar / Proteksi -->
+        <div class="badge-group">
+            <div id="badge_charge" class="badge">Charge: OFF</div>
+            <div id="badge_discharge" class="badge">Discharge: OFF</div>
+            <div id="badge_balance" class="badge">Balance: OFF</div>
+        </div>
+
+        <hr>
+
+        <h2>Kapasitas & Energi</h2>
+        <div class="grid-2">
+            <div class="card">
+                <div class="title">Sisa Kapasitas</div>
+                <div class="value" id="val_remain_cap">-</div>
+                <div class="unit">Ah</div>
+            </div>
+            <div class="card">
+                <div class="title">Setting Kapasitas</div>
+                <div class="value" id="val_setting_cap">-</div>
+                <div class="unit">Ah</div>
+            </div>
+            <div class="card">
+                <div class="title">Cycle Capacity</div>
+                <div class="value" id="val_cycle_cap">-</div>
+                <div class="unit">Ah</div>
+            </div>
+            <div class="card">
+                <div class="title">Jumlah Siklus</div>
+                <div class="value" id="val_cycle_count">-</div>
+                <div class="unit">Siklus</div>
+            </div>
+            <div class="card">
+                <div class="title">Energi Charge Hari Ini</div>
+                <div class="value" id="val_energy_charge">-</div>
+                <div class="unit">kWh</div>
+            </div>
+            <div class="card">
+                <div class="title">Energi Discharge Hari Ini</div>
+                <div class="value" id="val_energy_discharge">-</div>
+                <div class="unit">kWh</div>
+            </div>
+        </div>
+
+        <hr>
+
+        <h2>Detail Cell & Suhu</h2>
+        <div class="grid-2">
+            <div class="card">
+                <div class="title">Rata-rata Cell</div>
+                <div class="value" id="val_avg_cell">-</div>
+                <div class="unit">Volt (V)</div>
+            </div>
+            <div class="card">
+                <div class="title">Delta Cell</div>
+                <div class="value" id="val_delta_cell">-</div>
+                <div class="unit">Volt (V)</div>
+            </div>
+            <div class="card">
+                <div class="title">Cell Max (Nomor)</div>
+                <div class="value" id="val_max_cell">-</div>
+                <div class="unit" id="val_max_num">Sel -</div>
+            </div>
+            <div class="card">
+                <div class="title">Cell Min (Nomor)</div>
+                <div class="value" id="val_min_cell">-</div>
+                <div class="unit" id="val_min_num">Sel -</div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="card">
+                <div class="title">Suhu Baterai T1 / T2</div>
+                <div class="value" id="val_temp_bat">-</div>
+                <div class="unit">°C</div>
+            </div>
+            <div class="card">
+                <div class="title">Suhu MOS</div>
+                <div class="value" id="val_temp_mos">-</div>
+                <div class="unit">°C</div>
+            </div>
+        </div>
+
+        <div style="margin-top:15px; font-weight:600; font-size:15px; color:magenta; text-align:center;">
+            <b>Cell Voltages (<span id="cell_count_txt">0</span> Cell)</b>
+        </div>
+        <div id="cellsGrid" class="cells-grid">
+            <!-- Sel-sel baterai akan dirender di sini via JS -->
+        </div>
+
+        <hr>
+
+        <!-- Nama Klien & Tombol Ubah -->
+        <div class="client-info">
+            <span style="color:yellow; font-size:15px;"><b>Nama Klien:</b></span><br>
+            <button class="client-btn" onclick="openClientModal()" id="displayClientName">
+                🔍 Klik untuk Atur Nama Klien
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal Ubah Nama Klien -->
+    <div id="clientModal" class="modal-overlay">
+        <div class="modal-card">
+            <h2>Konfigurasi Klien</h2>
+            <hr>
+            <form onsubmit="saveClientName(event)">
+                <div class="input-group">
+                    <label>Nama Klien MQTT:</label>
+                    <input type="text" id="modalInputClient" placeholder="Contoh: jikong.fffendy.tanudjaja.001" required>
+                </div>
+                <button type="submit" class="btn-primary">💾 SIMPAN & KONEKSIKAN</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <p>&copy; 2026 <a href="mailto:teguh.sakura@yahoo.com">Teguh Sakura</a></p>
+        <div style="margin-top:10px;">
+            <a href="https://shopee.co.id/teguhfarm" style="color:#ee4d2d; margin:0 10px;">🛒 <b>Shopee</b></a>
+            <a href="https://tokopedia.com/teguhhydrofarm" style="color:#00AA5B; margin:0 10px;">🛒 <b>Tokopedia</b></a>
+        </div>
+    </div>
+
+    <script>
+        let client = null;
+        let clientName = localStorage.getItem('jikong_client_name') || '';
+
+        window.addEventListener('DOMContentLoaded', () => {
+            if (!clientName) {
+                openClientModal();
+            } else {
+                updateClientDisplay();
+                connectMQTT();
+            }
+        });
+
+        function openClientModal() {
+            document.getElementById('modalInputClient').value = clientName;
+            document.getElementById('clientModal').classList.add('active');
+        }
+
+        function closeClientModal() {
+            document.getElementById('clientModal').classList.remove('active');
+        }
+
+        function saveClientName(e) {
+            e.preventDefault();
+            const inputVal = document.getElementById('modalInputClient').value.trim();
+            if (inputVal) {
+                clientName = inputVal;
+                localStorage.setItem('jikong_client_name', clientName);
+                updateClientDisplay();
+                closeClientModal();
+                connectMQTT();
+            }
+        }
+
+        function updateClientDisplay() {
+            document.getElementById('displayClientName').innerText = "🔑 " + clientName + " (Klik untuk ubah)";
+        }
+
+        function connectMQTT() {
+            if (client) {
+                client.end();
+            }
+
+            const statusBox = document.getElementById('statusBox');
+            statusBox.className = 'status-bar status-disconnected';
+            statusBox.innerText = '⏳ Menghubungkan ke Broker...';
+
+            const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
+            const options = {
+                clientId: 'web_jikong_' + Math.random().toString(16).substr(2, 8),
+                username: 'emqx',
+                password: 'public',
+                clean: true
+            };
+
+            client = mqtt.connect(brokerUrl, options);
+
+            client.on('connect', () => {
+                statusBox.className = 'status-bar status-connected';
+                statusBox.innerText = '🟢 Terhubung ke Broker';
+
+                const topic = "Smart_BMS_Jikong/" + clientName + "/alldata";
+                client.subscribe(topic, (err) => {
+                    if (err) console.error('Gagal Subscribe:', err);
+                });
+            });
+
+            client.on('message', (topic, message) => {
+                try {
+                    const data = JSON.parse(message.toString());
+                    renderBmsData(data);
+                } catch (err) {
+                    console.error('Parsing JSON Gagal:', err);
+                }
+            });
+
+            client.on('error', (err) => {
+                statusBox.className = 'status-bar status-disconnected';
+                statusBox.innerText = '🔴 Gagal Terhubung ke Broker';
+            });
+
+            client.on('offline', () => {
+                statusBox.className = 'status-bar status-disconnected';
+                statusBox.innerText = '🔴 Terputus dari Broker';
+            });
+        }
+
+        function renderBmsData(data) {
+            // Ringkasan Utama
+            document.getElementById('val_voltage').innerText = data.battery_voltage ?? '-';
+            document.getElementById('val_current').innerText = data.charge_current ?? '-';
+            document.getElementById('val_power').innerText = data.battery_power ?? '-';
+            document.getElementById('val_soc').innerText = data.soc ?? '-';
+
+            // Status Sakelar
+            toggleBadge('badge_charge', 'Charge', data.charge === 1);
+            toggleBadge('badge_discharge', 'Discharge', data.discharge === 1);
+            toggleBadge('badge_balance', 'Balance', data.balance === 1);
+
+            // Kapasitas & Energi
+            document.getElementById('val_remain_cap').innerText = data.capacity_remain ?? '-';
+            document.getElementById('val_setting_cap').innerText = data.capacity_setting ?? '-';
+            document.getElementById('val_cycle_cap').innerText = data.cycle_capacity ?? '-';
+            document.getElementById('val_cycle_count').innerText = data.cycle_count ?? '-';
+            document.getElementById('val_energy_charge').innerText = data.energy_charging_today ?? '-';
+            document.getElementById('val_energy_discharge').innerText = data.energy_discharging_today ?? '-';
+
+            // Detail Sel & Suhu
+            document.getElementById('val_avg_cell').innerText = data.average_cell_voltage ?? '-';
+            document.getElementById('val_delta_cell').innerText = data.delta_cell_voltage ?? '-';
+            
+            document.getElementById('val_max_cell').innerText = data.cell_max_voltage ? data.cell_max_voltage + " V" : '-';
+            document.getElementById('val_max_num').innerText = data.cell_number_max_voltage ? "Cell No. " + data.cell_number_max_voltage : 'Sel -';
+
+            document.getElementById('val_min_cell').innerText = data.cell_min_voltage ? data.cell_min_voltage + " V" : '-';
+            document.getElementById('val_min_num').innerText = data.cell_number_min_voltage ? "Cell No. " + data.cell_number_min_voltage : 'Sel -';
+
+            document.getElementById('val_temp_bat').innerText = `${data.battery_t1 ?? 0} / ${data.battery_t2 ?? 0}`;
+            document.getElementById('val_temp_mos').innerText = data.mos_temp ?? '-';
+
+            // Render Sel Baterai Individual
+            if (Array.isArray(data.cell_voltages)) {
+                document.getElementById('cell_count_txt').innerText = data.cell_count || data.cell_voltages.length;
+                const cellsGrid = document.getElementById('cellsGrid');
+                cellsGrid.innerHTML = '';
+
+                data.cell_voltages.forEach((v, index) => {
+                    const cellNum = index + 1;
+                    const cellBox = document.createElement('div');
+                    cellBox.className = 'cell-box';
+
+                    if (cellNum === data.cell_number_min_voltage) {
+                        cellBox.classList.add('min-cell');
+                    } else if (cellNum === data.cell_number_max_voltage) {
+                        cellBox.classList.add('max-cell');
+                    }
+
+                    cellBox.innerHTML = `
+                        <div class="cell-label">Cell ${cellNum}</div>
+                        <b>${v.toFixed(3)} V</b>
+                    `;
+                    cellsGrid.appendChild(cellBox);
+                });
+            }
+        }
+
+        function toggleBadge(id, label, isActive) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            if (isActive) {
+                el.classList.add('active');
+                el.innerText = `${label}: ON`;
+            } else {
+                el.classList.remove('active');
+                el.innerText = `${label}: OFF`;
+            }
+        }
+    </script>
+</body>
+</html>
